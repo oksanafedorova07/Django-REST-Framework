@@ -9,4 +9,5 @@ urlpatterns = [
     path('api/', include(router.urls)),
     path('api/', include('materials.urls')),
     path('api/users/', include('users.urls')),
+    path('api/', include('users.urls')),
 ]
