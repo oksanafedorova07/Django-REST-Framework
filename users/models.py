@@ -1,21 +1,48 @@
-from django.contrib.auth.models import AbstractUser
+from materials.models import Course, Lesson
+from django.contrib.auth.models import AbstractUser, BaseUserManager
 from django.db import models
 
-from materials.models import Course, Lesson
 
+class UserManager(BaseUserManager):
+    def create_user(self, email, password=None, **extra_fields):
+        if not email:
+            raise ValueError('Пользователь должен иметь email')
+        email = self.normalize_email(email)
+        user = self.model(email=email, **extra_fields)
+        user.set_password(password)
+        user.save(using=self._db)
+        return user
+
+    def create_superuser(self, email, password, **extra_fields):
+        extra_fields.setdefault('is_staff', True)
+        extra_fields.setdefault('is_superuser', True)
+
+        if extra_fields.get('is_staff') is not True:
+            raise ValueError('Суперпользователь должен иметь is_staff=True.')
+        if extra_fields.get('is_superuser') is not True:
+            raise ValueError('Суперпользователь должен иметь is_superuser=True.')
+
+        return self.create_user(email, password, **extra_fields)
 
 class User(AbstractUser):
-    username = None  # Отключаем username
+    objects = UserManager()
+    username = None
     email = models.EmailField(unique=True)
     phone = models.CharField(max_length=20, blank=True, null=True)
     city = models.CharField(max_length=100, blank=True, null=True)
     avatar = models.ImageField(upload_to="avatars/", blank=True, null=True)
+    courses = models.ManyToManyField('materials.Course', blank=True, related_name='students')
 
     USERNAME_FIELD = "email"
     REQUIRED_FIELDS = []
 
     def __str__(self):
         return self.email
+
+    class Meta:
+        verbose_name = "Пользователь"
+        verbose_name_plural = "Пользователи"
+
 
 
 class Payment(models.Model):
@@ -33,3 +60,9 @@ class Payment(models.Model):
 
     def __str__(self):
         return f"{self.user} - {self.amount}"
+
+    class Meta:
+        verbose_name = "Платеж"
+        verbose_name_plural = "Платежи"
+        ordering = ('-payment_date',)
+
