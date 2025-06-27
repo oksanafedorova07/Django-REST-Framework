@@ -1,12 +1,13 @@
-from materials.models import Course, Lesson
 from django.contrib.auth.models import AbstractUser, BaseUserManager
 from django.db import models
+
+from materials.models import Course, Lesson
 
 
 class UserManager(BaseUserManager):
     def create_user(self, email, password=None, **extra_fields):
         if not email:
-            raise ValueError('Пользователь должен иметь email')
+            raise ValueError("Пользователь должен иметь email")
         email = self.normalize_email(email)
         user = self.model(email=email, **extra_fields)
         user.set_password(password)
@@ -14,15 +15,16 @@ class UserManager(BaseUserManager):
         return user
 
     def create_superuser(self, email, password, **extra_fields):
-        extra_fields.setdefault('is_staff', True)
-        extra_fields.setdefault('is_superuser', True)
+        extra_fields.setdefault("is_staff", True)
+        extra_fields.setdefault("is_superuser", True)
 
-        if extra_fields.get('is_staff') is not True:
-            raise ValueError('Суперпользователь должен иметь is_staff=True.')
-        if extra_fields.get('is_superuser') is not True:
-            raise ValueError('Суперпользователь должен иметь is_superuser=True.')
+        if extra_fields.get("is_staff") is not True:
+            raise ValueError("Суперпользователь должен иметь is_staff=True.")
+        if extra_fields.get("is_superuser") is not True:
+            raise ValueError("Суперпользователь должен иметь is_superuser=True.")
 
         return self.create_user(email, password, **extra_fields)
+
 
 class User(AbstractUser):
     objects = UserManager()
@@ -31,7 +33,9 @@ class User(AbstractUser):
     phone = models.CharField(max_length=20, blank=True, null=True)
     city = models.CharField(max_length=100, blank=True, null=True)
     avatar = models.ImageField(upload_to="avatars/", blank=True, null=True)
-    courses = models.ManyToManyField('materials.Course', blank=True, related_name='students')
+    courses = models.ManyToManyField(
+        "materials.Course", blank=True, related_name="students"
+    )
 
     USERNAME_FIELD = "email"
     REQUIRED_FIELDS = []
@@ -42,7 +46,6 @@ class User(AbstractUser):
     class Meta:
         verbose_name = "Пользователь"
         verbose_name_plural = "Пользователи"
-
 
 
 class Payment(models.Model):
@@ -64,5 +67,4 @@ class Payment(models.Model):
     class Meta:
         verbose_name = "Платеж"
         verbose_name_plural = "Платежи"
-        ordering = ('-payment_date',)
-
+        ordering = ("-payment_date",)

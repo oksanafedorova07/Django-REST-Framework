@@ -1,10 +1,11 @@
 from django_filters.rest_framework import DjangoFilterBackend
-from rest_framework import filters, generics, viewsets, permissions
+from rest_framework import filters, generics, permissions, viewsets
 from rest_framework.generics import UpdateAPIView
 from rest_framework.permissions import IsAuthenticated
 
 from .models import Payment, User
-from .serializers import PaymentSerializer, UserSerializer, PublicUserSerializer, PrivateUserSerializer
+from .serializers import (PaymentSerializer, PrivateUserSerializer,
+                          PublicUserSerializer, UserSerializer)
 
 
 class UserProfileUpdateView(UpdateAPIView):
@@ -20,15 +21,17 @@ class PaymentListView(generics.ListCreateAPIView):
     ordering_fields = ["payment_date"]
     ordering = ["-payment_date"]  # По умолчанию — свежие сверху
 
+
 class UserViewSet(viewsets.ModelViewSet):
     queryset = User.objects.all()
     serializer_class = UserSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     def get_permissions(self):
-        if self.action in ['create', 'list']:
+        if self.action in ["create", "list"]:
             return []
         return super().get_permissions()
+
 
 class UserDetailView(generics.RetrieveAPIView):
     queryset = User.objects.all()
