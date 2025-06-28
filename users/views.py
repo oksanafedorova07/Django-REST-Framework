@@ -2,7 +2,7 @@ from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import filters, generics, permissions, viewsets
 from rest_framework.generics import UpdateAPIView
 from rest_framework.permissions import IsAuthenticated
-
+from rest_framework.permissions import AllowAny
 from .models import Payment, User
 from .serializers import (PaymentSerializer, PrivateUserSerializer,
                           PublicUserSerializer, UserSerializer)
@@ -28,8 +28,8 @@ class UserViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_permissions(self):
-        if self.action in ["create", "list"]:
-            return []
+        if self.action == 'create':  # Разрешить регистрацию без авторизации
+            return [AllowAny()]
         return super().get_permissions()
 
 
