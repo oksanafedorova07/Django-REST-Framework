@@ -1,26 +1,34 @@
+from django.db.models import Count, Sum
 from django_filters.rest_framework import DjangoFilterBackend
-from rest_framework import filters, generics, permissions, viewsets
-from rest_framework.generics import UpdateAPIView
-from rest_framework.permissions import IsAuthenticated
+from rest_framework import generics, permissions, viewsets
+from rest_framework.filters import OrderingFilter
 from rest_framework.permissions import AllowAny
-from .models import Payment, User
-from .serializers import (PaymentSerializer, PrivateUserSerializer,
-                          PublicUserSerializer, UserSerializer)
+from rest_framework.response import Response
 
+from .serializers import (
+    PaymentSerializer,
+    UserSerializer,
+    PublicProfileSerializer,
+    PrivateProfileSerializer,
+    UserProfileWithPaymentsSerializer
+)
+from .models import Payment
+from .filters import PaymentFilter
+from .permissions import IsProfileOwner
+from django.contrib.auth import get_user_model
 
-class UserProfileUpdateView(UpdateAPIView):
-    queryset = User.objects.all()
-    serializer_class = UserSerializer
-
+User = get_user_model()
 
 class PaymentListView(generics.ListCreateAPIView):
-    queryset = Payment.objects.all()
     serializer_class = PaymentSerializer
-    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
-    filterset_fields = ["course", "lesson", "method"]
+    permission_classes = [permissions.IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, OrderingFilter]
+    filterset_class = PaymentFilter
     ordering_fields = ["payment_date"]
-    ordering = ["-payment_date"]  # По умолчанию — свежие сверху
+    ordering = ["-payment_date"]
 
+    def get_queryset(self):
+        return Payment.objects.filter(user=self.request.user)
 
 class UserViewSet(viewsets.ModelViewSet):
     queryset = User.objects.all()
@@ -28,17 +36,57 @@ class UserViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_permissions(self):
-        if self.action == 'create':  # Разрешить регистрацию без авторизации
+        if self.action == 'create':
             return [AllowAny()]
         return super().get_permissions()
 
+class UserProfileDetailView(generics.RetrieveAPIView):
+    queryset = User.objects.only('id', 'email', 'first_name', 'city', 'avatar')
+    serializer_class = PublicProfileSerializer
+    permission_classes = [permissions.IsAuthenticated, IsProfileOwner]
+    lookup_field = 'pk'
 
-class UserDetailView(generics.RetrieveAPIView):
-    queryset = User.objects.all()
-    serializer_class = PublicUserSerializer
-    permission_classes = [IsAuthenticated]
+class OwnProfileUpdateView(generics.RetrieveUpdateAPIView):
+    serializer_class = UserProfileWithPaymentsSerializer
+    permission_classes = [permissions.IsAuthenticated, IsProfileOwner]
 
-    def get_serializer_class(self):
-        if self.request.user == self.get_object():
-            return PrivateUserSerializer
-        return super().get_serializer_class()
+    def get_object(self):
+        return self.request.user
+
+    def get_queryset(self):
+        return User.objects.prefetch_related(
+            'payments',
+            'payments__course',
+            'payments__lesson'
+        ).filter(pk=self.request.user.pk)
+
+class PaymentHistoryView(generics.ListAPIView):
+    serializer_class = PaymentSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, OrderingFilter]
+    filterset_class = PaymentFilter
+    ordering_fields = ['payment_date']
+    ordering = ['-payment_date']
+
+    def get_queryset(self):
+        return Payment.objects.filter(user=self.request.user)
+
+class PaymentStatsView(generics.RetrieveAPIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, *args, **kwargs):
+        total = Payment.objects.filter(user=request.user).aggregate(
+            total_amount=Sum('amount')
+        )['total_amount'] or 0
+
+        by_method = Payment.objects.filter(user=request.user).values(
+            'payment_method'
+        ).annotate(
+            total=Sum('amount'),
+            count=Count('id')
+        )
+
+        return Response({
+            'total_amount': total,
+            'by_method': by_method
+        })

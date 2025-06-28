@@ -1,38 +1,83 @@
 from rest_framework import serializers
 from django.contrib.auth.hashers import make_password
-from materials.serializers import CourseSerializer, LessonSerializer
-from .models import Payment, User
+from django.contrib.auth import get_user_model
+from rest_framework.exceptions import ValidationError
+import os
+from .models import Payment
 
+User = get_user_model()
 
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = ["id", 'email', 'password', "phone", "city", "avatar"]
         read_only_fields = ["id"]
+        extra_kwargs = {'password': {'write_only': True}}
 
     def create(self, validated_data):
-        # Хэширование пароля
         validated_data['password'] = make_password(validated_data['password'])
         return super().create(validated_data)
 
 class PaymentSerializer(serializers.ModelSerializer):
-    course = CourseSerializer(read_only=True)
-    lesson = LessonSerializer(read_only=True)
+    course_title = serializers.SerializerMethodField()
+    lesson_title = serializers.SerializerMethodField()
+    payment_method_display = serializers.SerializerMethodField()
 
     class Meta:
         model = Payment
-        fields = ["id", "payment_date", "course", "lesson", "amount", "method"]
+        fields = [
+            'id', 'payment_date', 'amount',
+            'payment_method', 'payment_method_display',
+            'course', 'course_title',
+            'lesson', 'lesson_title'
+        ]
+        extra_kwargs = {
+            'course': {'write_only': True},
+            'lesson': {'write_only': True},
+        }
 
+    def get_course_title(self, obj):
+        return obj.course.name if obj.course else None
 
-class PublicUserSerializer(serializers.ModelSerializer):
+    def get_lesson_title(self, obj):
+        return obj.lesson.name if obj.lesson else None
+
+    def get_payment_method_display(self, obj):
+        return obj.get_payment_method_display()
+
+class PublicProfileSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ["id", "email", "city", "avatar"]
+        fields = ('id', 'email', 'first_name', 'city', 'avatar')
+        read_only_fields = fields
 
+class PrivateProfileSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = User
+        fields = ('id', 'email', 'first_name', 'last_name', 'phone', 'city', 'avatar')
+        extra_kwargs = {'email': {'read_only': True}}
 
-class PrivateUserSerializer(serializers.ModelSerializer):
-    payments = PaymentSerializer(many=True, read_only=True)
+    def validate_avatar(self, value):
+        if value:
+            ext = os.path.splitext(value.name)[1]
+            valid_extensions = ['.jpg', '.jpeg', '.png', '.gif']
+            if not ext.lower() in valid_extensions:
+                raise ValidationError('Неподдерживаемый формат изображения')
+            if value.size > 2 * 1024 * 1024:
+                raise ValidationError('Файл слишком большой (макс. 2MB)')
+        return value
+
+class UserProfileWithPaymentsSerializer(serializers.ModelSerializer):
+    payments = serializers.SerializerMethodField()
 
     class Meta:
         model = User
-        fields = ["id", "email", "phone", "city", "avatar", "payments"]
+        fields = ('id', 'email', 'first_name', 'last_name', 'phone', 'city', 'avatar', 'payments')
+        extra_kwargs = {
+            'email': {'read_only': True},
+            'last_name': {'write_only': True},
+        }
+
+    def get_payments(self, obj):
+        payments = obj.payments.all().order_by('-payment_date')[:5]
+        return PaymentSerializer(payments, many=True).data
