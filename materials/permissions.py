@@ -8,4 +8,4 @@ class IsOwnerOrModerator(BasePermission):
             return True
 
         # Разрешаем доступ модераторам
-        return request.user.groups.filter(name='moderators').exists()
+        return request.user.groups.filter(name="moderators").exists()

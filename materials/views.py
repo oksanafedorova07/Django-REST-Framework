@@ -1,8 +1,9 @@
-from rest_framework import viewsets, generics
-from .models import Course, Lesson
-from .serializers import CourseSerializer, LessonSerializer
-from .permissions import IsOwnerOrModerator
+from rest_framework import generics, viewsets
 from rest_framework.permissions import IsAuthenticated
+
+from .models import Course, Lesson
+from .permissions import IsOwnerOrModerator
+from .serializers import CourseSerializer, LessonSerializer
 
 
 class CourseViewSet(viewsets.ModelViewSet):
@@ -11,11 +12,11 @@ class CourseViewSet(viewsets.ModelViewSet):
     queryset = Course.objects.none()
 
     def get_permissions(self):
-        if self.action == 'create':
+        if self.action == "create":
             self.permission_classes = [IsAuthenticated]
         elif self.action in ["update", "partial_update", "retrieve"]:
             self.permission_classes = [IsOwnerOrModerator]
-        elif self.action == 'destroy':
+        elif self.action == "destroy":
             self.permission_classes = [IsOwnerOrModerator]
         return super().get_permissions()
 

@@ -1,9 +1,10 @@
+from django.contrib.auth import get_user_model
 from django.db.models.signals import pre_save
 from django.dispatch import receiver
 from django.utils import timezone
-from django.contrib.auth import get_user_model
 
 User = get_user_model()
+
 
 @receiver(pre_save, sender=User)
 def update_last_activity(sender, instance, **kwargs):
