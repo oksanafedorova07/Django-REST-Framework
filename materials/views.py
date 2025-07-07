@@ -58,15 +58,10 @@ class SubscriptionView(APIView):
 
         if subscription.exists():
             subscription.delete()
-            message = "Подписка удалена"
+            return Response(status=204)  # No Content - подписка удалена
         else:
             Subscription.objects.create(user=user, course=course)
-            message = "Подписка добавлена"
-
-        return Response({"message": message})
-
-    def perform_create(self, serializer):
-        serializer.save(owner=self.request.user)
+            return Response(status=201)  # Created - подписка создана
 
 
 class LessonDetailView(generics.RetrieveUpdateDestroyAPIView):
