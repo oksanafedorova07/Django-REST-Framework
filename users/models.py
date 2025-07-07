@@ -64,7 +64,7 @@ class Payment(models.Model):
         ("transfer", "Перевод на счет"),
         ("stripe", "Stripe"),
     ]
-    
+
     PAYMENT_STATUSES = [
         ("pending", "Ожидает оплаты"),
         ("paid", "Оплачен"),
@@ -110,28 +110,16 @@ class Payment(models.Model):
     )
     # Stripe fields
     stripe_product_id = models.CharField(
-        max_length=255,
-        blank=True,
-        null=True,
-        verbose_name="ID продукта в Stripe"
+        max_length=255, blank=True, null=True, verbose_name="ID продукта в Stripe"
     )
     stripe_price_id = models.CharField(
-        max_length=255,
-        blank=True,
-        null=True,
-        verbose_name="ID цены в Stripe"
+        max_length=255, blank=True, null=True, verbose_name="ID цены в Stripe"
     )
     stripe_session_id = models.CharField(
-        max_length=255,
-        blank=True,
-        null=True,
-        verbose_name="ID сессии в Stripe"
+        max_length=255, blank=True, null=True, verbose_name="ID сессии в Stripe"
     )
     stripe_payment_intent_id = models.CharField(
-        max_length=255,
-        blank=True,
-        null=True,
-        verbose_name="ID платежа в Stripe"
+        max_length=255, blank=True, null=True, verbose_name="ID платежа в Stripe"
     )
 
     def __str__(self):
