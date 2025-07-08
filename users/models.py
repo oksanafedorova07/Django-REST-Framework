@@ -62,6 +62,14 @@ class Payment(models.Model):
     PAYMENT_METHODS = [
         ("cash", "Наличные"),
         ("transfer", "Перевод на счет"),
+        ("stripe", "Stripe"),
+    ]
+
+    PAYMENT_STATUSES = [
+        ("pending", "Ожидает оплаты"),
+        ("paid", "Оплачен"),
+        ("failed", "Ошибка оплаты"),
+        ("cancelled", "Отменен"),
     ]
 
     user = models.ForeignKey(
@@ -92,7 +100,26 @@ class Payment(models.Model):
         max_length=20,
         choices=PAYMENT_METHODS,
         verbose_name="Способ оплаты",
-        default="cash",  # Добавляем значение по умолчанию
+        default="cash",
+    )
+    payment_status = models.CharField(
+        max_length=20,
+        choices=PAYMENT_STATUSES,
+        verbose_name="Статус платежа",
+        default="pending",
+    )
+    # Stripe fields
+    stripe_product_id = models.CharField(
+        max_length=255, blank=True, null=True, verbose_name="ID продукта в Stripe"
+    )
+    stripe_price_id = models.CharField(
+        max_length=255, blank=True, null=True, verbose_name="ID цены в Stripe"
+    )
+    stripe_session_id = models.CharField(
+        max_length=255, blank=True, null=True, verbose_name="ID сессии в Stripe"
+    )
+    stripe_payment_intent_id = models.CharField(
+        max_length=255, blank=True, null=True, verbose_name="ID платежа в Stripe"
     )
 
     def __str__(self):
