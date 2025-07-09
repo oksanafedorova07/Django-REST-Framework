@@ -1,4 +1,7 @@
+from datetime import timedelta
+
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import (OpenApiExample, OpenApiParameter,
                                    extend_schema, extend_schema_view)
@@ -12,6 +15,7 @@ from .paginators import CoursePagination, LessonPagination
 from .permissions import IsOwnerOrModerator
 from .serializers import (CourseSerializer, LessonSerializer,
                           SubscriptionSerializer)
+from .tasks import send_course_update_email
 
 
 @extend_schema_view(
@@ -60,6 +64,32 @@ class CourseViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(owner=self.request.user)
+
+    def update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        last_updated = instance.updated_at
+        response = super().update(request, *args, **kwargs)
+        instance.refresh_from_db()
+        if timezone.now() - last_updated > timedelta(hours=4):
+            material_title = getattr(instance, "name", "материал")
+            for sub in instance.subscriptions.all():
+                send_course_update_email.delay(
+                    sub.user.email, instance.name, material_title
+                )
+        return response
+
+    def partial_update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        last_updated = instance.updated_at
+        response = super().partial_update(request, *args, **kwargs)
+        instance.refresh_from_db()
+        if timezone.now() - last_updated > timedelta(hours=4):
+            material_title = getattr(instance, "name", "материал")
+            for sub in instance.subscriptions.all():
+                send_course_update_email.delay(
+                    sub.user.email, instance.name, material_title
+                )
+        return response
 
 
 @extend_schema_view(
@@ -153,3 +183,31 @@ class LessonDetailView(generics.RetrieveUpdateDestroyAPIView):
 
     def get_queryset(self):
         return Lesson.objects.filter(owner=self.request.user)
+
+    def update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        course = instance.course
+        last_updated = course.updated_at
+        response = super().update(request, *args, **kwargs)
+        course.refresh_from_db()
+        if timezone.now() - last_updated > timedelta(hours=4):
+            material_title = getattr(instance, "name", "материал")
+            for sub in course.subscriptions.all():
+                send_course_update_email.delay(
+                    sub.user.email, course.name, material_title
+                )
+        return response
+
+    def partial_update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        course = instance.course
+        last_updated = course.updated_at
+        response = super().partial_update(request, *args, **kwargs)
+        course.refresh_from_db()
+        if timezone.now() - last_updated > timedelta(hours=4):
+            material_title = getattr(instance, "name", "материал")
+            for sub in course.subscriptions.all():
+                send_course_update_email.delay(
+                    sub.user.email, course.name, material_title
+                )
+        return response

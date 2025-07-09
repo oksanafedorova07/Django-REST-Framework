@@ -1,13 +1,13 @@
-#!/usr/bin/env python
-"""
-Тестовый скрипт для проверки интеграции со Stripe
-"""
-
 import os
 import sys
 from decimal import Decimal
 
 import django
+
+"""
+Тестовый скрипт для проверки интеграции со Stripe
+"""
+
 
 # Настройка Django
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
