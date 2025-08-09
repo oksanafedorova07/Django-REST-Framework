@@ -77,6 +77,8 @@ jobs:
     env:
       REGISTRY: ghcr.io
       IMAGE_REPO: ${{ github.repository }}
+      HAS_SSH_KEY: ${{ secrets.SSH_KEY != '' }}
+      HAS_SSH_PASSWORD: ${{ secrets.SSH_PASSWORD != '' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -106,7 +108,7 @@ jobs:
             ${{ steps.img.outputs.image }}
             ${{ steps.img.outputs.image_latest }}
       - name: Prepare app directory (key)
-        if: ${{ secrets.SSH_KEY != '' }}
+        if: ${{ env.HAS_SSH_KEY == 'true' }}
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.SSH_HOST }}
@@ -122,7 +124,7 @@ jobs:
             mkdir -p "$APP_DIR"
 
       - name: Prepare app directory (password)
-        if: ${{ secrets.SSH_KEY == '' && secrets.SSH_PASSWORD != '' }}
+        if: ${{ env.HAS_SSH_KEY != 'true' && env.HAS_SSH_PASSWORD == 'true' }}
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.SSH_HOST }}
@@ -137,7 +139,7 @@ jobs:
             mkdir -p "$APP_DIR"
 
       - name: Copy docker-compose.prod.yml to server (key)
-        if: ${{ secrets.SSH_KEY != '' }}
+        if: ${{ env.HAS_SSH_KEY == 'true' }}
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.SSH_HOST }}
@@ -149,7 +151,7 @@ jobs:
           target: ${{ secrets.APP_DIR }}
 
       - name: Copy docker-compose.prod.yml to server (password)
-        if: ${{ secrets.SSH_KEY == '' && secrets.SSH_PASSWORD != '' }}
+        if: ${{ env.HAS_SSH_KEY != 'true' && env.HAS_SSH_PASSWORD == 'true' }}
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.SSH_HOST }}
@@ -160,7 +162,7 @@ jobs:
           target: ${{ secrets.APP_DIR }}
 
       - name: Deploy over SSH (key)
-        if: ${{ success() && secrets.SSH_KEY != '' }}
+        if: ${{ success() && env.HAS_SSH_KEY == 'true' }}
         uses: appleboy/ssh-action@v1.2.0
         env:
           APP_DIR: ${{ secrets.APP_DIR }}
@@ -245,7 +247,7 @@ jobs:
             docker image prune -f
 
       - name: Deploy over SSH (password)
-        if: ${{ success() && secrets.SSH_KEY == '' && secrets.SSH_PASSWORD != '' }}
+        if: ${{ success() && env.HAS_SSH_KEY != 'true' && env.HAS_SSH_PASSWORD == 'true' }}
         uses: appleboy/ssh-action@v1.2.0
         env:
           APP_DIR: ${{ secrets.APP_DIR }}
