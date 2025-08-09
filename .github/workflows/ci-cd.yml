@@ -1,0 +1,173 @@
+name: CI/CD
+
+on:
+  push:
+    branches:
+      - '**'
+
+jobs:
+  tests:
+    name: Run tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_DB: django_rest
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres" --health-interval=10s --health-timeout=5s --health-retries=5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping" --health-interval=10s --health-timeout=5s --health-retries=5
+    env:
+      # Django settings expectations
+      SECRET_KEY: test-secret-key
+      NAME: django_rest
+      USER: postgres
+      PASSWORD: postgres
+      HOST: postgres
+      PORT: '5432'
+      REDIS_URL: redis://redis:6379/0
+      EMAIL_HOST: smtp.yandex.ru
+      EMAIL_PORT: '465'
+      # Stripe test keys (не используются в реальном запросе)
+      STRIPE_SECRET_KEY: sk_test_fake
+      STRIPE_PUBLISHABLE_KEY: pk_test_fake
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run pytest
+        run: |
+          pytest -q
+
+  deploy:
+    name: Build image and deploy to server
+    needs: tests
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      REGISTRY: ghcr.io
+      IMAGE_REPO: ${{ github.repository }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set lowercased image tag
+        id: img
+        run: |
+          IMAGE_LC="${REGISTRY}/$(echo "${IMAGE_REPO}" | tr '[:upper:]' '[:lower:]'):${GITHUB_SHA}"
+          echo "IMAGE=${IMAGE_LC}" >> $GITHUB_ENV
+          echo "image=${IMAGE_LC}" >> $GITHUB_OUTPUT
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ steps.img.outputs.image }}
+            ghcr.io/${{ github.repository }}/latest
+
+      - name: Deploy over SSH
+        if: ${{ success() }}
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          password: ${{ secrets.SSH_PASSWORD }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          script_stop: true
+          envs: IMAGE
+          script: |
+            set -e
+            # Директория приложения на сервере (секретом укажите полный путь, например /var/www/drf)
+            APP_DIR="${{ secrets.APP_DIR }}"
+            if [ -z "$APP_DIR" ]; then echo "APP_DIR secret is required"; exit 1; fi
+            mkdir -p "$APP_DIR"
+            cd "$APP_DIR"
+
+            # Записать docker-compose.prod.yml из содержимого репозитория (передаётся ниже отдельным шагом)
+            # Логин в GHCR для pull приватного образа (если заданы секреты)
+            if [ -n "${{ secrets.GHCR_USERNAME }}" ] && [ -n "${{ secrets.GHCR_TOKEN }}" ]; then
+              echo "Logging into GHCR..."
+              echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u "${{ secrets.GHCR_USERNAME }}" --password-stdin
+            fi
+
+            echo "Using image: $IMAGE"
+            docker pull "$IMAGE"
+
+            # Сформировать .env.prod из секретов (если указаны)
+            cat > .env.prod << 'EOF'
+DEBUG=${{ secrets.ENV_DEBUG || 'False' }}
+SECRET_KEY=${{ secrets.ENV_SECRET_KEY }}
+ALLOWED_HOSTS=${{ secrets.ENV_ALLOWED_HOSTS }}
+CSRF_TRUSTED_ORIGINS=${{ secrets.ENV_CSRF_TRUSTED_ORIGINS }}
+
+NAME=${{ secrets.ENV_DB_NAME || 'django_rest' }}
+USER=${{ secrets.ENV_DB_USER || 'postgres' }}
+PASSWORD=${{ secrets.ENV_DB_PASSWORD || 'postgres' }}
+HOST=db
+PORT=5432
+
+REDIS_URL=redis://redis:6379/0
+
+EMAIL_HOST=${{ secrets.ENV_EMAIL_HOST || 'smtp.yandex.ru' }}
+EMAIL_PORT=${{ secrets.ENV_EMAIL_PORT || '465' }}
+EMAIL_HOST_USER=${{ secrets.ENV_EMAIL_HOST_USER || '' }}
+EMAIL_HOST_PASSWORD=${{ secrets.ENV_EMAIL_HOST_PASSWORD || '' }}
+DEFAULT_FROM_EMAIL=${{ secrets.ENV_DEFAULT_FROM_EMAIL || 'noreply@yandex.ru' }}
+
+STRIPE_SECRET_KEY=${{ secrets.ENV_STRIPE_SECRET_KEY || 'sk_test_fake' }}
+STRIPE_PUBLISHABLE_KEY=${{ secrets.ENV_STRIPE_PUBLISHABLE_KEY || 'pk_test_fake' }}
+EOF
+
+            # Запуск/обновление контейнеров
+            docker compose -f docker-compose.prod.yml --env-file ./.env.prod up -d --remove-orphans
+
+            # Очистка висящих образов
+            docker image prune -f
+
+      - name: Copy docker-compose.prod.yml to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          password: ${{ secrets.SSH_PASSWORD }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          source: "docker-compose.prod.yml"
+          target: ${{ secrets.APP_DIR }}
+
+
+
+
+
