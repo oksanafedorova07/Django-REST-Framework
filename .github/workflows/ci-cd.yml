@@ -107,13 +107,20 @@ jobs:
           tags: |
             ${{ steps.img.outputs.image }}
             ${{ steps.img.outputs.image_latest }}
+
+      - name: Prepare SSH key file
+        if: ${{ env.HAS_SSH_KEY == 'true' }}
+        run: |
+          echo "${{ secrets.SSH_KEY }}" > .ssh_key
+          sed -i 's/\r$//' .ssh_key
+          chmod 600 .ssh_key
       - name: Prepare app directory (key)
         if: ${{ env.HAS_SSH_KEY == 'true' }}
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_KEY }}
+          key_path: ./.ssh_key
           passphrase: ${{ secrets.SSH_PASSPHRASE }}
           port: 22
           script_stop: true
@@ -144,7 +151,7 @@ jobs:
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_KEY }}
+          key_path: ./.ssh_key
           passphrase: ${{ secrets.SSH_PASSPHRASE }}
           port: 22
           source: "docker-compose.prod.yml"
@@ -185,7 +192,7 @@ jobs:
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_KEY }}
+          key_path: ./.ssh_key
           passphrase: ${{ secrets.SSH_PASSPHRASE }}
           port: 22
           script_stop: true
@@ -196,14 +203,24 @@ jobs:
             mkdir -p "$APP_DIR"
             cd "$APP_DIR"
 
+            # Определить команду docker (с sudo, если нужно)
+            if command -v docker >/dev/null 2>&1; then
+              DOCKER_CMD="docker"
+            elif command -v sudo >/dev/null 2>&1 && sudo -n docker version >/dev/null 2>&1; then
+              DOCKER_CMD="sudo docker"
+            else
+              echo "Docker не найден или недоступен пользователю. Проверьте установку Docker и права пользователя."
+              exit 1
+            fi
+
             # Логин в GHCR для pull приватного образа (если заданы секреты)
             if [ -n "$GHCR_USERNAME" ] && [ -n "$GHCR_TOKEN" ]; then
               echo "Logging into GHCR..."
-              echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
+              echo "$GHCR_TOKEN" | $DOCKER_CMD login ghcr.io -u "$GHCR_USERNAME" --password-stdin
             fi
 
             echo "Using image: $IMAGE"
-            docker pull "$IMAGE"
+            $DOCKER_CMD pull "$IMAGE"
 
             # Сформировать .env.prod из секретов (если указаны)
             {
@@ -231,10 +248,14 @@ jobs:
             } > .env.prod
 
             # Определить команду compose (plugin или standalone)
-            if docker compose version >/dev/null 2>&1; then
-              COMPOSE_CMD="docker compose"
+            if $DOCKER_CMD compose version >/dev/null 2>&1; then
+              COMPOSE_CMD="$DOCKER_CMD compose"
             elif command -v docker-compose >/dev/null 2>&1; then
-              COMPOSE_CMD="docker-compose"
+              if command -v sudo >/dev/null 2>&1 && sudo -n docker-compose version >/dev/null 2>&1; then
+                COMPOSE_CMD="sudo docker-compose"
+              else
+                COMPOSE_CMD="docker-compose"
+              fi
             else
               echo "Docker Compose не установлен. Установите docker compose plugin или docker-compose."
               exit 1
@@ -244,7 +265,7 @@ jobs:
             $COMPOSE_CMD -f docker-compose.prod.yml --env-file ./.env.prod up -d --remove-orphans
 
             # Очистка висящих образов
-            docker image prune -f
+            $DOCKER_CMD image prune -f
 
       - name: Deploy over SSH (password)
         if: ${{ success() && env.HAS_SSH_KEY != 'true' && env.HAS_SSH_PASSWORD == 'true' }}
@@ -280,14 +301,24 @@ jobs:
             mkdir -p "$APP_DIR"
             cd "$APP_DIR"
 
+            # Определить команду docker (с sudo, если нужно)
+            if command -v docker >/dev/null 2>&1; then
+              DOCKER_CMD="docker"
+            elif command -v sudo >/dev/null 2>&1 && sudo -n docker version >/dev/null 2>&1; then
+              DOCKER_CMD="sudo docker"
+            else
+              echo "Docker не найден или недоступен пользователю. Проверьте установку Docker и права пользователя."
+              exit 1
+            fi
+
             # Логин в GHCR для pull приватного образа (если заданы секреты)
             if [ -n "$GHCR_USERNAME" ] && [ -n "$GHCR_TOKEN" ]; then
               echo "Logging into GHCR..."
-              echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
+              echo "$GHCR_TOKEN" | $DOCKER_CMD login ghcr.io -u "$GHCR_USERNAME" --password-stdin
             fi
 
             echo "Using image: $IMAGE"
-            docker pull "$IMAGE"
+            $DOCKER_CMD pull "$IMAGE"
 
             # Сформировать .env.prod из секретов (если указаны)
             {
@@ -315,10 +346,14 @@ jobs:
             } > .env.prod
 
             # Определить команду compose (plugin или standalone)
-            if docker compose version >/dev/null 2>&1; then
-              COMPOSE_CMD="docker compose"
+            if $DOCKER_CMD compose version >/dev/null 2>&1; then
+              COMPOSE_CMD="$DOCKER_CMD compose"
             elif command -v docker-compose >/dev/null 2>&1; then
-              COMPOSE_CMD="docker-compose"
+              if command -v sudo >/dev/null 2>&1 && sudo -n docker-compose version >/dev/null 2>&1; then
+                COMPOSE_CMD="sudo docker-compose"
+              else
+                COMPOSE_CMD="docker-compose"
+              fi
             else
               echo "Docker Compose не установлен. Установите docker compose plugin или docker-compose."
               exit 1
@@ -328,7 +363,7 @@ jobs:
             $COMPOSE_CMD -f docker-compose.prod.yml --env-file ./.env.prod up -d --remove-orphans
 
             # Очистка висящих образов
-            docker image prune -f
+            $DOCKER_CMD image prune -f
 
 
 
