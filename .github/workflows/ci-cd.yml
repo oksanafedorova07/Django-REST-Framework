@@ -192,8 +192,18 @@ jobs:
               echo "STRIPE_PUBLISHABLE_KEY=${ENV_STRIPE_PUBLISHABLE_KEY:-pk_test_fake}"
             } > .env.prod
 
+            # Определить команду compose (plugin или standalone)
+            if docker compose version >/dev/null 2>&1; then
+              COMPOSE_CMD="docker compose"
+            elif command -v docker-compose >/dev/null 2>&1; then
+              COMPOSE_CMD="docker-compose"
+            else
+              echo "Docker Compose не установлен. Установите docker compose plugin или docker-compose."
+              exit 1
+            fi
+
             # Запуск/обновление контейнеров
-            docker compose -f docker-compose.prod.yml --env-file ./.env.prod up -d --remove-orphans
+            $COMPOSE_CMD -f docker-compose.prod.yml --env-file ./.env.prod up -d --remove-orphans
 
             # Очистка висящих образов
             docker image prune -f
