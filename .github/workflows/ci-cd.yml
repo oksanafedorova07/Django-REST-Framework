@@ -54,6 +54,14 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Flake8 (errors)
+        run: |
+          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+
+      - name: Flake8 (style, non-blocking)
+        run: |
+          flake8 . --count --exit-zero --max-complexity=10 --max-line-length=100 --statistics
+
       - name: Run pytest
         run: |
           pytest -q
@@ -97,12 +105,28 @@ jobs:
           tags: |
             ${{ steps.img.outputs.image }}
             ${{ steps.img.outputs.image_latest }}
-      - name: Prepare app directory on server
+      - name: Prepare app directory (key)
+        if: ${{ secrets.SSH_KEY != '' }}
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
+          passphrase: ${{ secrets.SSH_PASSPHRASE }}
+          port: 22
+          script_stop: true
+          script: |
+            set -e
+            APP_DIR="${{ secrets.APP_DIR }}"
+            if [ -z "$APP_DIR" ]; then echo "APP_DIR secret is required"; exit 1; fi
+            mkdir -p "$APP_DIR"
+
+      - name: Prepare app directory (password)
+        if: ${{ secrets.SSH_KEY == '' && secrets.SSH_PASSWORD != '' }}
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
           password: ${{ secrets.SSH_PASSWORD }}
           port: 22
           script_stop: true
@@ -112,19 +136,31 @@ jobs:
             if [ -z "$APP_DIR" ]; then echo "APP_DIR secret is required"; exit 1; fi
             mkdir -p "$APP_DIR"
 
-      - name: Copy docker-compose.prod.yml to server
+      - name: Copy docker-compose.prod.yml to server (key)
+        if: ${{ secrets.SSH_KEY != '' }}
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
+          passphrase: ${{ secrets.SSH_PASSPHRASE }}
+          port: 22
+          source: "docker-compose.prod.yml"
+          target: ${{ secrets.APP_DIR }}
+
+      - name: Copy docker-compose.prod.yml to server (password)
+        if: ${{ secrets.SSH_KEY == '' && secrets.SSH_PASSWORD != '' }}
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
           password: ${{ secrets.SSH_PASSWORD }}
           port: 22
           source: "docker-compose.prod.yml"
           target: ${{ secrets.APP_DIR }}
 
-      - name: Deploy over SSH
-        if: ${{ success() }}
+      - name: Deploy over SSH (key)
+        if: ${{ success() && secrets.SSH_KEY != '' }}
         uses: appleboy/ssh-action@v1.2.0
         env:
           APP_DIR: ${{ secrets.APP_DIR }}
@@ -148,6 +184,90 @@ jobs:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
+          passphrase: ${{ secrets.SSH_PASSPHRASE }}
+          port: 22
+          script_stop: true
+          envs: IMAGE,APP_DIR,ENV_DEBUG,ENV_SECRET_KEY,ENV_ALLOWED_HOSTS,ENV_CSRF_TRUSTED_ORIGINS,ENV_DB_NAME,ENV_DB_USER,ENV_DB_PASSWORD,ENV_EMAIL_HOST,ENV_EMAIL_PORT,ENV_EMAIL_HOST_USER,ENV_EMAIL_HOST_PASSWORD,ENV_DEFAULT_FROM_EMAIL,ENV_STRIPE_SECRET_KEY,ENV_STRIPE_PUBLISHABLE_KEY,GHCR_USERNAME,GHCR_TOKEN
+          script: |
+            set -e
+            if [ -z "$APP_DIR" ]; then echo "APP_DIR secret is required"; exit 1; fi
+            mkdir -p "$APP_DIR"
+            cd "$APP_DIR"
+
+            # Логин в GHCR для pull приватного образа (если заданы секреты)
+            if [ -n "$GHCR_USERNAME" ] && [ -n "$GHCR_TOKEN" ]; then
+              echo "Logging into GHCR..."
+              echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
+            fi
+
+            echo "Using image: $IMAGE"
+            docker pull "$IMAGE"
+
+            # Сформировать .env.prod из секретов (если указаны)
+            {
+              echo "DEBUG=${ENV_DEBUG:-False}"
+              echo "SECRET_KEY=${ENV_SECRET_KEY}"
+              echo "ALLOWED_HOSTS=${ENV_ALLOWED_HOSTS}"
+              echo "CSRF_TRUSTED_ORIGINS=${ENV_CSRF_TRUSTED_ORIGINS}"
+
+              echo "NAME=${ENV_DB_NAME:-django_rest}"
+              echo "USER=${ENV_DB_USER:-postgres}"
+              echo "PASSWORD=${ENV_DB_PASSWORD:-postgres}"
+              echo "HOST=db"
+              echo "PORT=5432"
+
+              echo "REDIS_URL=redis://redis:6379/0"
+
+              echo "EMAIL_HOST=${ENV_EMAIL_HOST:-smtp.yandex.ru}"
+              echo "EMAIL_PORT=${ENV_EMAIL_PORT:-465}"
+              echo "EMAIL_HOST_USER=${ENV_EMAIL_HOST_USER}"
+              echo "EMAIL_HOST_PASSWORD=${ENV_EMAIL_HOST_PASSWORD}"
+              echo "DEFAULT_FROM_EMAIL=${ENV_DEFAULT_FROM_EMAIL:-noreply@yandex.ru}"
+
+              echo "STRIPE_SECRET_KEY=${ENV_STRIPE_SECRET_KEY:-sk_test_fake}"
+              echo "STRIPE_PUBLISHABLE_KEY=${ENV_STRIPE_PUBLISHABLE_KEY:-pk_test_fake}"
+            } > .env.prod
+
+            # Определить команду compose (plugin или standalone)
+            if docker compose version >/dev/null 2>&1; then
+              COMPOSE_CMD="docker compose"
+            elif command -v docker-compose >/dev/null 2>&1; then
+              COMPOSE_CMD="docker-compose"
+            else
+              echo "Docker Compose не установлен. Установите docker compose plugin или docker-compose."
+              exit 1
+            fi
+
+            # Запуск/обновление контейнеров
+            $COMPOSE_CMD -f docker-compose.prod.yml --env-file ./.env.prod up -d --remove-orphans
+
+            # Очистка висящих образов
+            docker image prune -f
+
+      - name: Deploy over SSH (password)
+        if: ${{ success() && secrets.SSH_KEY == '' && secrets.SSH_PASSWORD != '' }}
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          APP_DIR: ${{ secrets.APP_DIR }}
+          ENV_DEBUG: ${{ secrets.ENV_DEBUG }}
+          ENV_SECRET_KEY: ${{ secrets.ENV_SECRET_KEY }}
+          ENV_ALLOWED_HOSTS: ${{ secrets.ENV_ALLOWED_HOSTS }}
+          ENV_CSRF_TRUSTED_ORIGINS: ${{ secrets.ENV_CSRF_TRUSTED_ORIGINS }}
+          ENV_DB_NAME: ${{ secrets.ENV_DB_NAME }}
+          ENV_DB_USER: ${{ secrets.ENV_DB_USER }}
+          ENV_DB_PASSWORD: ${{ secrets.ENV_DB_PASSWORD }}
+          ENV_EMAIL_HOST: ${{ secrets.ENV_EMAIL_HOST }}
+          ENV_EMAIL_PORT: ${{ secrets.ENV_EMAIL_PORT }}
+          ENV_EMAIL_HOST_USER: ${{ secrets.ENV_EMAIL_HOST_USER }}
+          ENV_EMAIL_HOST_PASSWORD: ${{ secrets.ENV_EMAIL_HOST_PASSWORD }}
+          ENV_DEFAULT_FROM_EMAIL: ${{ secrets.ENV_DEFAULT_FROM_EMAIL }}
+          ENV_STRIPE_SECRET_KEY: ${{ secrets.ENV_STRIPE_SECRET_KEY }}
+          ENV_STRIPE_PUBLISHABLE_KEY: ${{ secrets.ENV_STRIPE_PUBLISHABLE_KEY }}
+          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
           password: ${{ secrets.SSH_PASSWORD }}
           port: 22
           script_stop: true
