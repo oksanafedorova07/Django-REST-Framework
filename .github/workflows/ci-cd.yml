@@ -108,19 +108,13 @@ jobs:
             ${{ steps.img.outputs.image }}
             ${{ steps.img.outputs.image_latest }}
 
-      - name: Prepare SSH key file
-        if: ${{ env.HAS_SSH_KEY == 'true' }}
-        run: |
-          echo "${{ secrets.SSH_KEY }}" > .ssh_key
-          sed -i 's/\r$//' .ssh_key
-          chmod 600 .ssh_key
       - name: Prepare app directory (key)
         if: ${{ env.HAS_SSH_KEY == 'true' }}
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
-          key_path: ./.ssh_key
+          key: ${{ secrets.SSH_KEY }}
           passphrase: ${{ secrets.SSH_PASSPHRASE }}
           port: 22
           script_stop: true
@@ -151,7 +145,7 @@ jobs:
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
-          key_path: ./.ssh_key
+          key: ${{ secrets.SSH_KEY }}
           passphrase: ${{ secrets.SSH_PASSPHRASE }}
           port: 22
           source: "docker-compose.prod.yml"
@@ -192,7 +186,7 @@ jobs:
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
-          key_path: ./.ssh_key
+          key: ${{ secrets.SSH_KEY }}
           passphrase: ${{ secrets.SSH_PASSPHRASE }}
           port: 22
           script_stop: true
