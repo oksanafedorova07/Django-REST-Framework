@@ -152,29 +152,29 @@ jobs:
             docker pull "$IMAGE"
 
             # Сформировать .env.prod из секретов (если указаны)
-            cat > .env.prod << 'EOF'
-DEBUG=${ENV_DEBUG:-False}
-SECRET_KEY=${ENV_SECRET_KEY}
-ALLOWED_HOSTS=${ENV_ALLOWED_HOSTS}
-CSRF_TRUSTED_ORIGINS=${ENV_CSRF_TRUSTED_ORIGINS}
+            {
+              echo "DEBUG=${ENV_DEBUG:-False}"
+              echo "SECRET_KEY=${ENV_SECRET_KEY}"
+              echo "ALLOWED_HOSTS=${ENV_ALLOWED_HOSTS}"
+              echo "CSRF_TRUSTED_ORIGINS=${ENV_CSRF_TRUSTED_ORIGINS}"
 
-NAME=${ENV_DB_NAME:-django_rest}
-USER=${ENV_DB_USER:-postgres}
-PASSWORD=${ENV_DB_PASSWORD:-postgres}
-HOST=db
-PORT=5432
+              echo "NAME=${ENV_DB_NAME:-django_rest}"
+              echo "USER=${ENV_DB_USER:-postgres}"
+              echo "PASSWORD=${ENV_DB_PASSWORD:-postgres}"
+              echo "HOST=db"
+              echo "PORT=5432"
 
-REDIS_URL=redis://redis:6379/0
+              echo "REDIS_URL=redis://redis:6379/0"
 
-EMAIL_HOST=${ENV_EMAIL_HOST:-smtp.yandex.ru}
-EMAIL_PORT=${ENV_EMAIL_PORT:-465}
-EMAIL_HOST_USER=${ENV_EMAIL_HOST_USER}
-EMAIL_HOST_PASSWORD=${ENV_EMAIL_HOST_PASSWORD}
-DEFAULT_FROM_EMAIL=${ENV_DEFAULT_FROM_EMAIL:-noreply@yandex.ru}
+              echo "EMAIL_HOST=${ENV_EMAIL_HOST:-smtp.yandex.ru}"
+              echo "EMAIL_PORT=${ENV_EMAIL_PORT:-465}"
+              echo "EMAIL_HOST_USER=${ENV_EMAIL_HOST_USER}"
+              echo "EMAIL_HOST_PASSWORD=${ENV_EMAIL_HOST_PASSWORD}"
+              echo "DEFAULT_FROM_EMAIL=${ENV_DEFAULT_FROM_EMAIL:-noreply@yandex.ru}"
 
-STRIPE_SECRET_KEY=${ENV_STRIPE_SECRET_KEY:-sk_test_fake}
-STRIPE_PUBLISHABLE_KEY=${ENV_STRIPE_PUBLISHABLE_KEY:-pk_test_fake}
-EOF
+              echo "STRIPE_SECRET_KEY=${ENV_STRIPE_SECRET_KEY:-sk_test_fake}"
+              echo "STRIPE_PUBLISHABLE_KEY=${ENV_STRIPE_PUBLISHABLE_KEY:-pk_test_fake}"
+            } > .env.prod
 
             # Запуск/обновление контейнеров
             docker compose -f docker-compose.prod.yml --env-file ./.env.prod up -d --remove-orphans
