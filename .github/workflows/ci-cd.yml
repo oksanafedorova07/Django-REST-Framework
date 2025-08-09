@@ -205,7 +205,8 @@ jobs:
           script_stop: true
           envs: IMAGE,APP_DIR,ENV_DEBUG,ENV_SECRET_KEY,ENV_ALLOWED_HOSTS,ENV_CSRF_TRUSTED_ORIGINS,ENV_DB_NAME,ENV_DB_USER,ENV_DB_PASSWORD,ENV_EMAIL_HOST,ENV_EMAIL_PORT,ENV_EMAIL_HOST_USER,ENV_EMAIL_HOST_PASSWORD,ENV_DEFAULT_FROM_EMAIL,ENV_STRIPE_SECRET_KEY,ENV_STRIPE_PUBLISHABLE_KEY,GHCR_USERNAME,GHCR_TOKEN
           script: |
-            set -e
+            set -euxo pipefail
+            echo "[DEPLOY] Starting deploy (key) to $APP_DIR"
             if [ -z "$APP_DIR" ]; then echo "APP_DIR secret is required"; exit 1; fi
             mkdir -p "$APP_DIR"
             cd "$APP_DIR"
@@ -219,6 +220,7 @@ jobs:
               echo "Docker не найден или недоступен пользователю. Проверьте установку Docker и права пользователя."
               exit 1
             fi
+            $DOCKER_CMD version
 
             # Логин в GHCR для pull приватного образа (если заданы секреты)
             if [ -n "$GHCR_USERNAME" ] && [ -n "$GHCR_TOKEN" ]; then
@@ -267,6 +269,7 @@ jobs:
               echo "Docker Compose не установлен. Установите docker compose plugin или docker-compose."
               exit 1
             fi
+            $COMPOSE_CMD version || true
 
             # Запуск/обновление контейнеров
             $COMPOSE_CMD -f docker-compose.prod.yml --env-file ./.env.prod up -d --remove-orphans
@@ -306,7 +309,8 @@ jobs:
           script_stop: true
           envs: IMAGE,APP_DIR,ENV_DEBUG,ENV_SECRET_KEY,ENV_ALLOWED_HOSTS,ENV_CSRF_TRUSTED_ORIGINS,ENV_DB_NAME,ENV_DB_USER,ENV_DB_PASSWORD,ENV_EMAIL_HOST,ENV_EMAIL_PORT,ENV_EMAIL_HOST_USER,ENV_EMAIL_HOST_PASSWORD,ENV_DEFAULT_FROM_EMAIL,ENV_STRIPE_SECRET_KEY,ENV_STRIPE_PUBLISHABLE_KEY,GHCR_USERNAME,GHCR_TOKEN
           script: |
-            set -e
+            set -euxo pipefail
+            echo "[DEPLOY] Starting deploy (password) to $APP_DIR"
             if [ -z "$APP_DIR" ]; then echo "APP_DIR secret is required"; exit 1; fi
             mkdir -p "$APP_DIR"
             cd "$APP_DIR"
@@ -320,6 +324,7 @@ jobs:
               echo "Docker не найден или недоступен пользователю. Проверьте установку Docker и права пользователя."
               exit 1
             fi
+            $DOCKER_CMD version
 
             # Логин в GHCR для pull приватного образа (если заданы секреты)
             if [ -n "$GHCR_USERNAME" ] && [ -n "$GHCR_TOKEN" ]; then
@@ -368,6 +373,7 @@ jobs:
               echo "Docker Compose не установлен. Установите docker compose plugin или docker-compose."
               exit 1
             fi
+            $COMPOSE_CMD version || true
 
             # Запуск/обновление контейнеров
             $COMPOSE_CMD -f docker-compose.prod.yml --env-file ./.env.prod up -d --remove-orphans
