@@ -1,0 +1,387 @@
+name: CI/CD
+
+on:
+  push:
+    branches:
+      - '**'
+
+jobs:
+  tests:
+    name: Run tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_DB: django_rest
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres" --health-interval=10s --health-timeout=5s --health-retries=5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping" --health-interval=10s --health-timeout=5s --health-retries=5
+    env:
+      # Django settings expectations
+      SECRET_KEY: test-secret-key
+      NAME: django_rest
+      USER: postgres
+      PASSWORD: postgres
+      HOST: postgres
+      PORT: '5432'
+      REDIS_URL: redis://redis:6379/0
+      EMAIL_HOST: smtp.yandex.ru
+      EMAIL_PORT: '465'
+      # Stripe test keys (не используются в реальном запросе)
+      STRIPE_SECRET_KEY: sk_test_fake
+      STRIPE_PUBLISHABLE_KEY: pk_test_fake
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Flake8 (errors)
+        run: |
+          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+
+      - name: Flake8 (style, non-blocking)
+        run: |
+          flake8 . --count --exit-zero --max-complexity=10 --max-line-length=100 --statistics
+
+      - name: Run pytest
+        run: |
+          pytest -q
+
+  deploy:
+    name: Build image and deploy to server
+    needs: tests
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/work/homework_35_2'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      REGISTRY: ghcr.io
+      IMAGE_REPO: ${{ github.repository }}
+      HAS_SSH_KEY: ${{ secrets.SSH_KEY != '' }}
+      HAS_SSH_PASSWORD: ${{ secrets.SSH_PASSWORD != '' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set lowercased image tags
+        id: img
+        run: |
+          IMAGE_LC="${REGISTRY}/$(echo "${IMAGE_REPO}" | tr '[:upper:]' '[:lower:]'):${GITHUB_SHA}"
+          echo "IMAGE=${IMAGE_LC}" >> $GITHUB_ENV
+          echo "image=${IMAGE_LC}" >> $GITHUB_OUTPUT
+          IMAGE_LATEST="${REGISTRY}/$(echo "${IMAGE_REPO}" | tr '[:upper:]' '[:lower:]'):latest"
+          echo "image_latest=${IMAGE_LATEST}" >> $GITHUB_OUTPUT
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ steps.img.outputs.image }}
+            ${{ steps.img.outputs.image_latest }}
+
+      - name: Prepare app directory (key)
+        if: ${{ env.HAS_SSH_KEY == 'true' }}
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          passphrase: ${{ secrets.SSH_PASSPHRASE }}
+          port: 22
+          debug: true
+          timeout: 60s
+          command_timeout: 10m
+          script_stop: true
+          script: |
+            set -e
+            APP_DIR="${{ secrets.APP_DIR }}"
+            if [ -z "$APP_DIR" ]; then echo "APP_DIR secret is required"; exit 1; fi
+            mkdir -p "$APP_DIR"
+
+      - name: Prepare app directory (password)
+        if: ${{ env.HAS_SSH_KEY != 'true' && env.HAS_SSH_PASSWORD == 'true' }}
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          password: ${{ secrets.SSH_PASSWORD }}
+          port: 22
+          debug: true
+          timeout: 60s
+          command_timeout: 10m
+          script_stop: true
+          script: |
+            set -e
+            APP_DIR="${{ secrets.APP_DIR }}"
+            if [ -z "$APP_DIR" ]; then echo "APP_DIR secret is required"; exit 1; fi
+            mkdir -p "$APP_DIR"
+
+      - name: Copy docker-compose.prod.yml to server (key)
+        if: ${{ env.HAS_SSH_KEY == 'true' }}
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          passphrase: ${{ secrets.SSH_PASSPHRASE }}
+          port: 22
+          debug: true
+          timeout: 60s
+          source: "docker-compose.prod.yml"
+          target: ${{ secrets.APP_DIR }}
+
+      - name: Copy docker-compose.prod.yml to server (password)
+        if: ${{ env.HAS_SSH_KEY != 'true' && env.HAS_SSH_PASSWORD == 'true' }}
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          password: ${{ secrets.SSH_PASSWORD }}
+          port: 22
+          debug: true
+          timeout: 60s
+          source: "docker-compose.prod.yml"
+          target: ${{ secrets.APP_DIR }}
+
+      - name: Deploy over SSH (key)
+        if: ${{ success() && env.HAS_SSH_KEY == 'true' }}
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          APP_DIR: ${{ secrets.APP_DIR }}
+          ENV_DEBUG: ${{ secrets.ENV_DEBUG }}
+          ENV_SECRET_KEY: ${{ secrets.ENV_SECRET_KEY }}
+          ENV_ALLOWED_HOSTS: ${{ secrets.ENV_ALLOWED_HOSTS }}
+          ENV_CSRF_TRUSTED_ORIGINS: ${{ secrets.ENV_CSRF_TRUSTED_ORIGINS }}
+          ENV_DB_NAME: ${{ secrets.ENV_DB_NAME }}
+          ENV_DB_USER: ${{ secrets.ENV_DB_USER }}
+          ENV_DB_PASSWORD: ${{ secrets.ENV_DB_PASSWORD }}
+          ENV_EMAIL_HOST: ${{ secrets.ENV_EMAIL_HOST }}
+          ENV_EMAIL_PORT: ${{ secrets.ENV_EMAIL_PORT }}
+          ENV_EMAIL_HOST_USER: ${{ secrets.ENV_EMAIL_HOST_USER }}
+          ENV_EMAIL_HOST_PASSWORD: ${{ secrets.ENV_EMAIL_HOST_PASSWORD }}
+          ENV_DEFAULT_FROM_EMAIL: ${{ secrets.ENV_DEFAULT_FROM_EMAIL }}
+          ENV_STRIPE_SECRET_KEY: ${{ secrets.ENV_STRIPE_SECRET_KEY }}
+          ENV_STRIPE_PUBLISHABLE_KEY: ${{ secrets.ENV_STRIPE_PUBLISHABLE_KEY }}
+          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          passphrase: ${{ secrets.SSH_PASSPHRASE }}
+          port: 22
+          debug: true
+          timeout: 120s
+          command_timeout: 20m
+          script_stop: true
+          envs: IMAGE,APP_DIR,ENV_DEBUG,ENV_SECRET_KEY,ENV_ALLOWED_HOSTS,ENV_CSRF_TRUSTED_ORIGINS,ENV_DB_NAME,ENV_DB_USER,ENV_DB_PASSWORD,ENV_EMAIL_HOST,ENV_EMAIL_PORT,ENV_EMAIL_HOST_USER,ENV_EMAIL_HOST_PASSWORD,ENV_DEFAULT_FROM_EMAIL,ENV_STRIPE_SECRET_KEY,ENV_STRIPE_PUBLISHABLE_KEY,GHCR_USERNAME,GHCR_TOKEN
+          script: |
+            set -euxo pipefail
+            echo "[DEPLOY] Starting deploy (key) to $APP_DIR"
+            if [ -z "$APP_DIR" ]; then echo "APP_DIR secret is required"; exit 1; fi
+            mkdir -p "$APP_DIR"
+            cd "$APP_DIR"
+
+            # Определить команду docker (с sudo, если нужно)
+            if command -v docker >/dev/null 2>&1; then
+              DOCKER_CMD="docker"
+            elif command -v sudo >/dev/null 2>&1 && sudo -n docker version >/dev/null 2>&1; then
+              DOCKER_CMD="sudo docker"
+            else
+              echo "Docker не найден или недоступен пользователю. Проверьте установку Docker и права пользователя."
+              exit 1
+            fi
+            $DOCKER_CMD version
+
+            # Логин в GHCR для pull приватного образа (если заданы секреты)
+            if [ -n "$GHCR_USERNAME" ] && [ -n "$GHCR_TOKEN" ]; then
+              echo "Logging into GHCR..."
+              echo "$GHCR_TOKEN" | $DOCKER_CMD login ghcr.io -u "$GHCR_USERNAME" --password-stdin
+            fi
+
+            echo "Using image: $IMAGE"
+            $DOCKER_CMD pull "$IMAGE"
+
+            # Сформировать .env.prod из секретов (если указаны)
+            {
+              echo "DEBUG=${ENV_DEBUG:-False}"
+              echo "SECRET_KEY=${ENV_SECRET_KEY}"
+              echo "ALLOWED_HOSTS=${ENV_ALLOWED_HOSTS}"
+              echo "CSRF_TRUSTED_ORIGINS=${ENV_CSRF_TRUSTED_ORIGINS}"
+
+              echo "NAME=${ENV_DB_NAME:-django_rest}"
+              echo "USER=${ENV_DB_USER:-postgres}"
+              echo "PASSWORD=${ENV_DB_PASSWORD:-postgres}"
+              echo "HOST=db"
+              echo "PORT=5432"
+
+              echo "REDIS_URL=redis://redis:6379/0"
+
+              echo "EMAIL_HOST=${ENV_EMAIL_HOST:-smtp.yandex.ru}"
+              echo "EMAIL_PORT=${ENV_EMAIL_PORT:-465}"
+              echo "EMAIL_HOST_USER=${ENV_EMAIL_HOST_USER}"
+              echo "EMAIL_HOST_PASSWORD=${ENV_EMAIL_HOST_PASSWORD}"
+              echo "DEFAULT_FROM_EMAIL=${ENV_DEFAULT_FROM_EMAIL:-noreply@yandex.ru}"
+
+              echo "STRIPE_SECRET_KEY=${ENV_STRIPE_SECRET_KEY:-sk_test_fake}"
+              echo "STRIPE_PUBLISHABLE_KEY=${ENV_STRIPE_PUBLISHABLE_KEY:-pk_test_fake}"
+            } > .env.prod
+
+            # Определить команду compose (plugin или standalone)
+            if $DOCKER_CMD compose version >/dev/null 2>&1; then
+              COMPOSE_CMD="$DOCKER_CMD compose"
+            elif command -v docker-compose >/dev/null 2>&1; then
+              if command -v sudo >/dev/null 2>&1 && sudo -n docker-compose version >/dev/null 2>&1; then
+                COMPOSE_CMD="sudo docker-compose"
+              else
+                COMPOSE_CMD="docker-compose"
+              fi
+            else
+              echo "Docker Compose не установлен. Установите docker compose plugin или docker-compose."
+              exit 1
+            fi
+            $COMPOSE_CMD version || true
+
+            # Запуск/обновление контейнеров
+            $COMPOSE_CMD -f docker-compose.prod.yml --env-file ./.env.prod up -d --remove-orphans
+
+            # Очистка висящих образов
+            $DOCKER_CMD image prune -f
+
+      - name: Deploy over SSH (password)
+        if: ${{ success() && env.HAS_SSH_KEY != 'true' && env.HAS_SSH_PASSWORD == 'true' }}
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          APP_DIR: ${{ secrets.APP_DIR }}
+          ENV_DEBUG: ${{ secrets.ENV_DEBUG }}
+          ENV_SECRET_KEY: ${{ secrets.ENV_SECRET_KEY }}
+          ENV_ALLOWED_HOSTS: ${{ secrets.ENV_ALLOWED_HOSTS }}
+          ENV_CSRF_TRUSTED_ORIGINS: ${{ secrets.ENV_CSRF_TRUSTED_ORIGINS }}
+          ENV_DB_NAME: ${{ secrets.ENV_DB_NAME }}
+          ENV_DB_USER: ${{ secrets.ENV_DB_USER }}
+          ENV_DB_PASSWORD: ${{ secrets.ENV_DB_PASSWORD }}
+          ENV_EMAIL_HOST: ${{ secrets.ENV_EMAIL_HOST }}
+          ENV_EMAIL_PORT: ${{ secrets.ENV_EMAIL_PORT }}
+          ENV_EMAIL_HOST_USER: ${{ secrets.ENV_EMAIL_HOST_USER }}
+          ENV_EMAIL_HOST_PASSWORD: ${{ secrets.ENV_EMAIL_HOST_PASSWORD }}
+          ENV_DEFAULT_FROM_EMAIL: ${{ secrets.ENV_DEFAULT_FROM_EMAIL }}
+          ENV_STRIPE_SECRET_KEY: ${{ secrets.ENV_STRIPE_SECRET_KEY }}
+          ENV_STRIPE_PUBLISHABLE_KEY: ${{ secrets.ENV_STRIPE_PUBLISHABLE_KEY }}
+          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          password: ${{ secrets.SSH_PASSWORD }}
+          port: 22
+          debug: true
+          timeout: 120s
+          command_timeout: 20m
+          script_stop: true
+          envs: IMAGE,APP_DIR,ENV_DEBUG,ENV_SECRET_KEY,ENV_ALLOWED_HOSTS,ENV_CSRF_TRUSTED_ORIGINS,ENV_DB_NAME,ENV_DB_USER,ENV_DB_PASSWORD,ENV_EMAIL_HOST,ENV_EMAIL_PORT,ENV_EMAIL_HOST_USER,ENV_EMAIL_HOST_PASSWORD,ENV_DEFAULT_FROM_EMAIL,ENV_STRIPE_SECRET_KEY,ENV_STRIPE_PUBLISHABLE_KEY,GHCR_USERNAME,GHCR_TOKEN
+          script: |
+            set -euxo pipefail
+            echo "[DEPLOY] Starting deploy (password) to $APP_DIR"
+            if [ -z "$APP_DIR" ]; then echo "APP_DIR secret is required"; exit 1; fi
+            mkdir -p "$APP_DIR"
+            cd "$APP_DIR"
+
+            # Определить команду docker (с sudo, если нужно)
+            if command -v docker >/dev/null 2>&1; then
+              DOCKER_CMD="docker"
+            elif command -v sudo >/dev/null 2>&1 && sudo -n docker version >/dev/null 2>&1; then
+              DOCKER_CMD="sudo docker"
+            else
+              echo "Docker не найден или недоступен пользователю. Проверьте установку Docker и права пользователя."
+              exit 1
+            fi
+            $DOCKER_CMD version
+
+            # Логин в GHCR для pull приватного образа (если заданы секреты)
+            if [ -n "$GHCR_USERNAME" ] && [ -n "$GHCR_TOKEN" ]; then
+              echo "Logging into GHCR..."
+              echo "$GHCR_TOKEN" | $DOCKER_CMD login ghcr.io -u "$GHCR_USERNAME" --password-stdin
+            fi
+
+            echo "Using image: $IMAGE"
+            $DOCKER_CMD pull "$IMAGE"
+
+            # Сформировать .env.prod из секретов (если указаны)
+            {
+              echo "DEBUG=${ENV_DEBUG:-False}"
+              echo "SECRET_KEY=${ENV_SECRET_KEY}"
+              echo "ALLOWED_HOSTS=${ENV_ALLOWED_HOSTS}"
+              echo "CSRF_TRUSTED_ORIGINS=${ENV_CSRF_TRUSTED_ORIGINS}"
+
+              echo "NAME=${ENV_DB_NAME:-django_rest}"
+              echo "USER=${ENV_DB_USER:-postgres}"
+              echo "PASSWORD=${ENV_DB_PASSWORD:-postgres}"
+              echo "HOST=db"
+              echo "PORT=5432"
+
+              echo "REDIS_URL=redis://redis:6379/0"
+
+              echo "EMAIL_HOST=${ENV_EMAIL_HOST:-smtp.yandex.ru}"
+              echo "EMAIL_PORT=${ENV_EMAIL_PORT:-465}"
+              echo "EMAIL_HOST_USER=${ENV_EMAIL_HOST_USER}"
+              echo "EMAIL_HOST_PASSWORD=${ENV_EMAIL_HOST_PASSWORD}"
+              echo "DEFAULT_FROM_EMAIL=${ENV_DEFAULT_FROM_EMAIL:-noreply@yandex.ru}"
+
+              echo "STRIPE_SECRET_KEY=${ENV_STRIPE_SECRET_KEY:-sk_test_fake}"
+              echo "STRIPE_PUBLISHABLE_KEY=${ENV_STRIPE_PUBLISHABLE_KEY:-pk_test_fake}"
+            } > .env.prod
+
+            # Определить команду compose (plugin или standalone)
+            if $DOCKER_CMD compose version >/dev/null 2>&1; then
+              COMPOSE_CMD="$DOCKER_CMD compose"
+            elif command -v docker-compose >/dev/null 2>&1; then
+              if command -v sudo >/dev/null 2>&1 && sudo -n docker-compose version >/dev/null 2>&1; then
+                COMPOSE_CMD="sudo docker-compose"
+              else
+                COMPOSE_CMD="docker-compose"
+              fi
+            else
+              echo "Docker Compose не установлен. Установите docker compose plugin или docker-compose."
+              exit 1
+            fi
+            $COMPOSE_CMD version || true
+
+            # Запуск/обновление контейнеров
+            $COMPOSE_CMD -f docker-compose.prod.yml --env-file ./.env.prod up -d --remove-orphans
+
+            # Очистка висящих образов
+            $DOCKER_CMD image prune -f
+
+
+
+
+

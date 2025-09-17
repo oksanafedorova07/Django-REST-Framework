@@ -1,0 +1,83 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15
+    container_name: drf_db
+    env_file:
+      - .env.prod
+    environment:
+      POSTGRES_DB: ${NAME}
+      POSTGRES_USER: ${USER}
+      POSTGRES_PASSWORD: ${PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - app_net
+
+  redis:
+    image: redis:7-alpine
+    container_name: drf_redis
+    networks:
+      - app_net
+
+  web:
+    image: ${IMAGE}
+    container_name: drf_web
+    env_file:
+      - .env.prod
+    depends_on:
+      - db
+      - redis
+    ports:
+      - "8000:8000"
+    command: >
+      sh -c "python manage.py migrate --noinput &&
+             python manage.py collectstatic --noinput &&
+             gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 3"
+    volumes:
+      - media_volume:/app/media
+    networks:
+      - app_net
+
+  celery_worker:
+    image: ${IMAGE}
+    container_name: drf_celery_worker
+    env_file:
+      - .env.prod
+    depends_on:
+      - db
+      - redis
+      - web
+    command: celery -A config worker --pool=solo -l info
+    volumes:
+      - media_volume:/app/media
+    networks:
+      - app_net
+
+  celery_beat:
+    image: ${IMAGE}
+    container_name: drf_celery_beat
+    env_file:
+      - .env.prod
+    depends_on:
+      - db
+      - redis
+      - web
+    command: celery -A config beat -l info
+    volumes:
+      - media_volume:/app/media
+    networks:
+      - app_net
+
+volumes:
+  postgres_data:
+  media_volume:
+
+networks:
+  app_net:
+    driver: bridge
+
+
+
+
